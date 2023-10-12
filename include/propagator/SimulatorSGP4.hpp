@@ -9,8 +9,6 @@
 #include <perturb/perturb.hpp>
 // #include "SimulatorBase.hpp"
 
-#include <GL/gl.h>
-
 /*
 std::ostream &
 operator<<(std::ostream &os, const std::array<double, 3> &a)
