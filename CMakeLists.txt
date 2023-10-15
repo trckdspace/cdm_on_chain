@@ -23,5 +23,5 @@ add_executable(run_chain src/Main.cpp src/Block.cpp
     src/BlockChain.cpp  
     src/SHA256.cpp 
     src/Transaction.cpp)
-target_link_libraries(run_chain perturb)
+target_link_libraries(run_chain perturb ssl crypto)
 

@@ -7,9 +7,15 @@
 
 #include "BlockChain.h"
 
+#include <DataGetter.hpp>
+
 int main(int argc, char *argv[])
 {
-	CBlockChain bChain = CBlockChain("../data/3le.txt", 2);
+
+	if (!SpaceTrackLiveData::get_latest_tles("./3le.txt"))
+		return -1;
+
+	CBlockChain bChain = CBlockChain("./3le.txt", 2);
 
 	bChain.SetPropagationResolutionSeconds(0.01);
 
