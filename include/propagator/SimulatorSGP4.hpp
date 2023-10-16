@@ -7,6 +7,8 @@
 #include "date.h"
 
 #include <perturb/perturb.hpp>
+#include <czml.hpp>
+
 // #include "SimulatorBase.hpp"
 
 /*
@@ -225,6 +227,19 @@ struct SimulatorSGP4
 
         int numberOfOrbits = satellites.size();
         start_time = std::chrono::system_clock::now();
+        epoch = this->displayTime();
+    }
+
+    std::string displayTime()
+    {
+        char buffer[64];
+        sprintf(buffer, "%04d:%02d:%02dT%02d:%02d:%02dZ",
+                dt.year,
+                dt.month,
+                dt.day,
+                dt.hour,
+                dt.min, int(dt.sec));
+        return std::string(buffer);
     }
 
     virtual std::string getTime()
@@ -266,16 +281,59 @@ struct SimulatorSGP4
 
         dt = t.to_datetime();
         // std::cerr << dt.year << ":" << dt.month << ":" << dt.day << "T" << dt.hour << ":" << dt.min << ":" << dt.sec << std::endl;
+
+        timestamps.push_back(std::chrono::duration_cast<std::chrono::seconds>(start_time - dp).count());
         for (size_t i = 0; i < satellites.size(); i++)
         {
             if (satellites[i].last_error() == perturb::Sgp4Error::NONE)
+            {
                 satellites[i].propagate(t, states[i]);
+                position_history[atoi(satellites[i].sat_rec.satnum)].push_back(states[i].position);
+            }
         }
 
         CollisionDetector detector;
         std::vector<std::pair<int, int>> collisions;
 
         detector.run(states, satellites, this->getTime(), cdms);
+
+        std::cerr << this->displayTime() << " " << timestamps.size() << std::endl;
+
+        if (timestamps.size() >= 120)
+        {
+            push_data_to_server();
+            epoch = this->displayTime();
+            timestamps.clear();
+            position_history.clear();
+        }
+    }
+
+    void push_data_to_server()
+    {
+        std::vector<CZML::json> json_sats;
+        for (int i = 0; i < satellites.size(); i++)
+        {
+            std::vector<double> positions_all_json;
+            for (int j = 0; j < 120; j++)
+            {
+                positions_all_json.push_back(timestamps[j]);
+                int id = atoi(satellites[i].sat_rec.satnum);
+                positions_all_json.push_back(position_history[id][j][0]);
+                positions_all_json.push_back(position_history[id][j][1]);
+                positions_all_json.push_back(position_history[id][j][2]);
+            }
+
+            json_sats.push_back(CZML::export_json(satellites[i].sat_rec.satnum, positions_all_json, epoch));
+        }
+
+        std::ofstream out("test");
+        ;
+        for (auto j : json_sats)
+        {
+            out << j.dump() << " , ";
+        }
+
+        out.close();
     }
 
     std::vector<perturb::Satellite> satellites;
@@ -287,4 +345,8 @@ struct SimulatorSGP4
     std::vector<int> oh_no_these_collided;
 
     perturb::DateTime dt;
+
+    std::map<int, std::vector<perturb::Vec3>> position_history;
+    std::string epoch;
+    std::vector<int> timestamps;
 };

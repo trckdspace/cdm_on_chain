@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
 
 	CBlockChain bChain = CBlockChain(data_source.c_str(), 2);
 
-	bChain.SetPropagationResolutionSeconds(0.01);
+	bChain.SetPropagationResolutionSeconds(1);
 
 	cout << "Genesis..." << endl;
 	bChain.AddGenesis();
