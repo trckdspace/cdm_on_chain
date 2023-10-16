@@ -194,14 +194,16 @@ struct SimulatorSGP4
                 auto s = perturb::Satellite::from_tle(line1, line2);
 
                 for (auto n : names)
+                {
                     if (n == atoi(s.sat_rec.satnum))
                     {
                         continue;
                     }
+                }
 
-                names.push_back(atoi(s.sat_rec.satnum));
                 // std::cerr << s.sat_rec.classification << std::endl;
                 // if (std::string(name).find("DEB") == std::string::npos)
+
                 //     colors.push_back(COLOR{0, 0, 1});
                 // else
                 //     colors.push_back(COLOR{0.5, 0.5, 0.5});
@@ -216,7 +218,11 @@ struct SimulatorSGP4
 
                 if (s.last_error() == perturb::Sgp4Error::NONE)
                 {
+                    if (std::string(name).find("DEB") == std::string::npos)
+                        s.sat_rec.classification = 'D';
                     satellites.push_back(s);
+                    names.push_back(atoi(s.sat_rec.satnum));
+                    sat_names.push_back((const char *)&name[2]);
                 }
             }
         }
@@ -227,13 +233,35 @@ struct SimulatorSGP4
 
         int numberOfOrbits = satellites.size();
         start_time = std::chrono::system_clock::now();
+        epoch_time_start = start_time;
+
+        auto dp = date::floor<date::days>(start_time);
+        auto ymd = date::year_month_day{dp};
+        auto time = date::make_time(std::chrono::duration_cast<std::chrono::milliseconds>(start_time - dp));
+
+        // std::cout << "year        = " << ymd.year() << '\n';
+        // std::cout << "month       = " << ymd.month() << '\n';
+        // std::cout << "day         = " << ymd.day() << '\n';
+        // std::cout << "hour        = " << time.hours().count() << "h\n";
+        // std::cout << "minute      = " << time.minutes().count() << "min\n";
+        // std::cout << "second      = " << time.seconds().count() << "s\n";
+        // std::cout << "millisecond = " << time.subseconds().count() << "ms\n";
+
+        const auto t = perturb::JulianDate(perturb::DateTime{(int)ymd.year(),
+                                                             (unsigned int)ymd.month(),
+                                                             (unsigned int)ymd.day(),
+                                                             (int)time.hours().count(),
+                                                             (int)time.minutes().count(),
+                                                             (float)time.seconds().count() + time.subseconds().count() / 1000.});
+
+        dt = t.to_datetime();
         epoch = this->displayTime();
     }
 
     std::string displayTime()
     {
         char buffer[64];
-        sprintf(buffer, "%04d:%02d:%02dT%02d:%02d:%02dZ",
+        sprintf(buffer, "%04d-%02d-%02dT%02d:%02d:%02dZ",
                 dt.year,
                 dt.month,
                 dt.day,
@@ -272,6 +300,7 @@ struct SimulatorSGP4
         // std::cout << "minute      = " << time.minutes().count() << "min\n";
         // std::cout << "second      = " << time.seconds().count() << "s\n";
         // std::cout << "millisecond = " << time.subseconds().count() << "ms\n";
+
         const auto t = perturb::JulianDate(perturb::DateTime{(int)ymd.year(),
                                                              (unsigned int)ymd.month(),
                                                              (unsigned int)ymd.day(),
@@ -282,7 +311,7 @@ struct SimulatorSGP4
         dt = t.to_datetime();
         // std::cerr << dt.year << ":" << dt.month << ":" << dt.day << "T" << dt.hour << ":" << dt.min << ":" << dt.sec << std::endl;
 
-        timestamps.push_back(std::chrono::duration_cast<std::chrono::seconds>(start_time - dp).count());
+        timestamps.push_back(std::chrono::duration_cast<std::chrono::seconds>(start_time - epoch_time_start).count());
         for (size_t i = 0; i < satellites.size(); i++)
         {
             if (satellites[i].last_error() == perturb::Sgp4Error::NONE)
@@ -310,27 +339,51 @@ struct SimulatorSGP4
 
     void push_data_to_server()
     {
-        std::vector<CZML::json> json_sats;
-        for (int i = 0; i < satellites.size(); i++)
+        std::ofstream out("test.czml");
+
+        out << R"([{
+            "id":"document",    
+            "name":"simple",
+            "version":"1.0",
+            "clock":{
+                "interval":")"
+            << epoch << "/" << displayTime() << R"(",
+                "currentTime":")"
+            << epoch << R"(",
+                "multiplier":1,
+                "range":"LOOP_STOP",
+                "step":"SYSTEM_CLOCK_MULTIPLIER"}
+            },
+            {
+                "id":"9927edc4-e87a-4e1f-9b8b-0bfb3b05b227",
+                "name":"Accesses",
+                "description":"List of Accesses"
+            },)";
+
+        // std::vector<CZML::json> json_sats;
+
+        size_t sz = 4000;
+        for (int i = 0; i < std::min(sz, satellites.size()); i++)
         {
             std::vector<double> positions_all_json;
             for (int j = 0; j < 120; j++)
             {
                 positions_all_json.push_back(timestamps[j]);
                 int id = atoi(satellites[i].sat_rec.satnum);
-                positions_all_json.push_back(position_history[id][j][0]);
-                positions_all_json.push_back(position_history[id][j][1]);
-                positions_all_json.push_back(position_history[id][j][2]);
+                positions_all_json.push_back(position_history[id][j][0] * 1000);
+                positions_all_json.push_back(position_history[id][j][1] * 1000);
+                positions_all_json.push_back(position_history[id][j][2] * 1000);
             }
 
-            json_sats.push_back(CZML::export_json(satellites[i].sat_rec.satnum, positions_all_json, epoch));
-        }
-
-        std::ofstream out("test");
-        ;
-        for (auto j : json_sats)
-        {
-            out << j.dump() << " , ";
+            auto sat_json = CZML::export_json(sat_names[i],
+                                              positions_all_json,
+                                              epoch,
+                                              satellites[i].sat_rec.classification == 'D');
+            out << sat_json.dump();
+            if (i < std::min(satellites.size(), sz) - 1)
+                out << " , " << std::endl;
+            else
+                out << "]";
         }
 
         out.close();
@@ -340,7 +393,7 @@ struct SimulatorSGP4
     std::vector<perturb::StateVector> states;
 
     float seconds = 0;
-    std::chrono::time_point<std::chrono::system_clock> start_time;
+    std::chrono::time_point<std::chrono::system_clock> start_time, epoch_time_start;
     // std::vector<std::pair<int, int>> collisions;
     std::vector<int> oh_no_these_collided;
 
@@ -349,4 +402,5 @@ struct SimulatorSGP4
     std::map<int, std::vector<perturb::Vec3>> position_history;
     std::string epoch;
     std::vector<int> timestamps;
+    std::vector<std::string> sat_names;
 };
