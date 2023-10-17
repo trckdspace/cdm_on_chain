@@ -9,5 +9,5 @@ namespace CZML
     using nlohmann::json;
     using namespace nlohmann::literals;
 
-    json export_json(const std::string &name, const std::vector<double> &positions, const std::string &epoch, bool isDebris);
+    json export_json(const std::string &id, const std::string &name, const std::vector<double> &positions, const std::string &epoch, bool isDebris);
 }

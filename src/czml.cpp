@@ -4,10 +4,10 @@
 using nlohmann::json;
 using namespace nlohmann::literals;
 
-json CZML::export_json(const std::string &name, const std::vector<double> &positions, const std::string &epoch, bool isDebris)
+json CZML::export_json(const std::string &sat_id, const std::string &name, const std::vector<double> &positions, const std::string &epoch, bool isDebris)
 {
     json templat;
-    templat["id"] = "Satellite/" + name;
+    templat["id"] = "Satellite/" + sat_id;
     templat["name"] = name;
 
     templat["point"] = R"({"show":[{"boolean":true}],"color":{"rgba":[255,255,0,50]},"outlineColor":{"rgba":[255,128,40,255]},"pixelSize":4,"outlineWidth ":0})"_json;

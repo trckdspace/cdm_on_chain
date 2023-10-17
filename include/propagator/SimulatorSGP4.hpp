@@ -9,6 +9,8 @@
 #include <perturb/perturb.hpp>
 #include <czml.hpp>
 
+#include "SHA256.h"
+
 // #include "SimulatorBase.hpp"
 
 /*
@@ -25,6 +27,12 @@ std::array<double, 3> operator-(const std::array<double, 3> a, const std::array<
 }
 
 */
+struct CDM_Cesium
+{
+    std::string time_string;
+    std::vector<double> position;
+};
+
 struct CollisionDetector
 {
     // Given a current position vector, quantize and fill bins to detect collisions.
@@ -72,8 +80,10 @@ struct CollisionDetector
 
     bool run(const std::vector<perturb::StateVector> &positions,
              const std::vector<perturb::Satellite> &satellites,
-             const std::string &current_time,
-             std::vector<CDM> &collisions)
+             const std::string &start_time,
+             const std::string &end_time,
+             std::vector<CDM> &collisions,
+             std::vector<CDM_Cesium> &cdm_cesium)
     {
         for (int i = 0; i < positions.size(); i++)
         {
@@ -112,18 +122,25 @@ struct CollisionDetector
                     msg.sat2_satnumber = satellites[q].sat_rec.satnum;
                     msg.relative_velocity = rel_vel(positions[p], positions[q]);
                     msg.min_distance = dist;
-                    msg.TimeClosestApproach = current_time;
+                    msg.TimeClosestApproach = start_time;
 
                     if (collisions.empty())
                     {
                         std::cerr << "\tFOUND CDM "
-                                  << msg.TimeClosestApproach << " "
+                                  << msg.TimeClosestApproach << "/" << end_time << " "
                                   << msg.sat1_satnumber << " "
                                   << msg.sat2_satnumber << " "
                                   << msg.min_distance << " "
                                   << msg.relative_velocity << std::endl;
 
                         collisions.push_back(msg);
+
+                        CDM_Cesium pt;
+                        pt.time_string = msg.TimeClosestApproach + "/" + end_time;
+                        for (int idx = 0; idx < 3; idx++)
+                            pt.position.push_back(positions[p].position[idx]);
+
+                        cdm_cesium.push_back(pt);
                     }
                     else
                     {
@@ -149,11 +166,17 @@ struct CollisionDetector
                         else
                         {
                             std::cerr << "\tFOUND CDM "
-                                      << msg.TimeClosestApproach << " "
+                                      << msg.TimeClosestApproach << "/" << end_time << " "
                                       << msg.sat1_satnumber << " "
                                       << msg.sat2_satnumber << " "
                                       << msg.min_distance << " "
                                       << msg.relative_velocity << std::endl;
+                            CDM_Cesium pt;
+                            pt.time_string = msg.TimeClosestApproach + "/" + end_time;
+                            for (int idx = 0; idx < 3; idx++)
+                                pt.position.push_back(positions[p].position[idx]);
+
+                            cdm_cesium.push_back(pt);
                             collisions.push_back(msg);
                         }
                     }
@@ -171,6 +194,22 @@ struct CollisionDetector
 
 struct SimulatorSGP4
 {
+
+    perturb::DateTime generate_date_time(std::chrono::time_point<std::chrono::system_clock> start_time)
+    {
+        auto dp = date::floor<date::days>(start_time);
+        auto ymd = date::year_month_day{dp};
+        auto time = date::make_time(std::chrono::duration_cast<std::chrono::milliseconds>(start_time - dp));
+        const auto t = perturb::JulianDate(perturb::DateTime{(int)ymd.year(),
+                                                             (unsigned int)ymd.month(),
+                                                             (unsigned int)ymd.day(),
+                                                             (int)time.hours().count(),
+                                                             (int)time.minutes().count(),
+                                                             (float)time.seconds().count() + time.subseconds().count() / 1000.});
+
+        return t.to_datetime();
+    }
+
     SimulatorSGP4(const char *filename)
     {
         std::ifstream in(filename);
@@ -224,6 +263,9 @@ struct SimulatorSGP4
                     names.push_back(atoi(s.sat_rec.satnum));
                     sat_names.push_back((const char *)&name[2]);
                 }
+
+                if (satellites.size() == 5000)
+                    break;
             }
         }
 
@@ -258,15 +300,29 @@ struct SimulatorSGP4
         epoch = this->displayTime();
     }
 
-    std::string displayTime()
+    std::string displayTime(int interval = 0)
     {
         char buffer[64];
+
+        int seconds = dt.sec;
+        int mins = dt.min;
+
+        seconds = seconds + interval;
+        mins = mins + seconds / 60;
+        seconds = seconds % 60;
+
+        if (mins == 60)
+        {
+            mins = 59;
+            seconds = 59;
+        }
+
         sprintf(buffer, "%04d-%02d-%02dT%02d:%02d:%02dZ",
                 dt.year,
                 dt.month,
                 dt.day,
                 dt.hour,
-                dt.min, int(dt.sec));
+                mins, int(seconds));
         return std::string(buffer);
     }
 
@@ -311,22 +367,32 @@ struct SimulatorSGP4
         dt = t.to_datetime();
         // std::cerr << dt.year << ":" << dt.month << ":" << dt.day << "T" << dt.hour << ":" << dt.min << ":" << dt.sec << std::endl;
 
-        timestamps.push_back(std::chrono::duration_cast<std::chrono::seconds>(start_time - epoch_time_start).count());
         for (size_t i = 0; i < satellites.size(); i++)
         {
             if (satellites[i].last_error() == perturb::Sgp4Error::NONE)
             {
                 satellites[i].propagate(t, states[i]);
-                position_history[atoi(satellites[i].sat_rec.satnum)].push_back(states[i].position);
             }
         }
 
         CollisionDetector detector;
         std::vector<std::pair<int, int>> collisions;
 
-        detector.run(states, satellites, this->getTime(), cdms);
+        detector.run(states, satellites, this->displayTime(0), this->displayTime(120), cdms, cdm_cesium);
 
-        std::cerr << this->displayTime() << " " << timestamps.size() << std::endl;
+        auto n_seconds_since_start = std::chrono::duration_cast<std::chrono::seconds>(start_time - epoch_time_start).count();
+        bool shouldLog = n_seconds_since_start % (5 * 60) == 0;
+        if (shouldLog)
+        {
+            std::cerr << this->displayTime() << " " << timestamps.size() << std::endl;
+            timestamps.push_back(n_seconds_since_start);
+            for (size_t i = 0; i < 5000; i++)
+            {
+                position_history[atoi(satellites[i].sat_rec.satnum)].push_back(states[i].position);
+            }
+
+            std::cerr << "CDMS # " << cdms.size() << std::endl;
+        }
 
         if (timestamps.size() >= number_step_viz)
         {
@@ -334,6 +400,13 @@ struct SimulatorSGP4
             epoch = this->displayTime();
             timestamps.clear();
             position_history.clear();
+            for (auto c : cdm_cesium)
+            {
+                std::cerr << c.time_string << " " << c.position[0] << " " << c.position[1] << " " << c.position[2] << std::endl;
+            }
+            cdm_cesium.clear();
+
+            std::cin.get();
         }
     }
 
@@ -350,7 +423,7 @@ struct SimulatorSGP4
             << epoch << "/" << displayTime() << R"(",
                 "currentTime":")"
             << epoch << R"(",
-                "multiplier":1,
+                "multiplier":50,
                 "range":"LOOP_STOP",
                 "step":"SYSTEM_CLOCK_MULTIPLIER"}
             },
@@ -361,6 +434,43 @@ struct SimulatorSGP4
             },)";
 
         // std::vector<CZML::json> json_sats;
+
+        for (auto c : cdm_cesium)
+        {
+            out << R"({"availability":")" << c.time_string
+                << R"(","position" : {"cartesian" : [)" << c.position[0] * 1000 << "," << c.position[1] * 1000 << "," << c.position[2] * 1000 << R"(]},
+                "point":{
+                    "show" : [{"boolean" : true}],
+                    "pixelSize" : 20,
+                    "color":{"rgba" : [255, 0, 0, 255]} 
+                    },
+                  "label":{
+                        "fillColor":{
+                            "rgba":[
+                            255,0,0,255
+                            ]
+                        },
+                        "font":"11pt Lucida Console",
+                        "horizontalOrigin":"LEFT",
+                        "outlineColor":{
+                            "rgba":[
+                            0,0,0,255
+                            ]
+                        },
+                        "outlineWidth":2,
+                        "pixelOffset":{
+                            "cartesian2":[
+                            12,0
+                            ]
+                        },
+                        "show":true,
+                        "style":"FILL_AND_OUTLINE",
+                        "text":")"
+                << sha256(c.time_string) << R"(",
+                        "verticalOrigin":"CENTER"
+                        }
+            },)";
+        }
 
         size_t sz = 5000; // satellites.size(); // 4000;
         for (int i = 0; i < std::min(sz, satellites.size()); i++)
@@ -375,21 +485,22 @@ struct SimulatorSGP4
                 positions_all_json.push_back(position_history[id][j][2] * 1000);
             }
 
-            auto sat_json = CZML::export_json(sat_names[i],
+            auto sat_json = CZML::export_json(satellites[i].sat_rec.satnum,
+                                              sat_names[i],
                                               positions_all_json,
                                               epoch,
-                                              satellites[i].sat_rec.classification == 'D');
+                                              satellites[i].sat_rec.classification != 'D');
             out << sat_json.dump();
             if (i < std::min(satellites.size(), sz) - 1)
                 out << " , " << std::endl;
             else
                 out << "]";
         }
-
         out.close();
     }
 
-    std::vector<perturb::Satellite> satellites;
+    std::vector<perturb::Satellite>
+        satellites;
     std::vector<perturb::StateVector> states;
 
     float seconds = 0;
@@ -405,4 +516,5 @@ struct SimulatorSGP4
     std::vector<std::string> sat_names;
 
     int number_step_viz = 100;
+    std::vector<CDM_Cesium> cdm_cesium;
 };

@@ -18,9 +18,9 @@ int main(int argc, char *argv[])
 		data_source = "../data/3le.txt";
 	}
 
-	CBlockChain bChain = CBlockChain(data_source.c_str(), 2);
+	CBlockChain bChain = CBlockChain(data_source.c_str(), 200000);
 
-	bChain.SetPropagationResolutionSeconds(5 * 60);
+	bChain.SetPropagationResolutionSeconds(1);
 
 	cout << "Genesis..." << endl;
 	bChain.AddGenesis();
