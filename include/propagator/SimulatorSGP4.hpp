@@ -328,7 +328,7 @@ struct SimulatorSGP4
 
         std::cerr << this->displayTime() << " " << timestamps.size() << std::endl;
 
-        if (timestamps.size() >= 120)
+        if (timestamps.size() >= number_step_viz)
         {
             push_data_to_server();
             epoch = this->displayTime();
@@ -362,13 +362,13 @@ struct SimulatorSGP4
 
         // std::vector<CZML::json> json_sats;
 
-        size_t sz = 4000;
+        size_t sz = 5000; // satellites.size(); // 4000;
         for (int i = 0; i < std::min(sz, satellites.size()); i++)
         {
             std::vector<double> positions_all_json;
-            for (int j = 0; j < 120; j++)
+            for (int j = 0; j < number_step_viz; j++)
             {
-                positions_all_json.push_back(timestamps[j]);
+                positions_all_json.push_back(timestamps[j] - timestamps[0] + 1);
                 int id = atoi(satellites[i].sat_rec.satnum);
                 positions_all_json.push_back(position_history[id][j][0] * 1000);
                 positions_all_json.push_back(position_history[id][j][1] * 1000);
@@ -403,4 +403,6 @@ struct SimulatorSGP4
     std::string epoch;
     std::vector<int> timestamps;
     std::vector<std::string> sat_names;
+
+    int number_step_viz = 100;
 };

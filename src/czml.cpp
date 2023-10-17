@@ -39,7 +39,7 @@ json CZML::export_json(const std::string &name, const std::vector<double> &posit
     templat["position"]["epoch"] = epoch;
     templat["label"]["text"] = name;
     if (isDebris)
-        templat["point"]["color"]["rgba"] = {128, 128, 128, 255};
+        templat["point"]["color"]["rgba"] = {0, 0, 255, 128};
     else
         templat["point"]["color"]["rgba"] = {0, 255, 0, 255};
 
